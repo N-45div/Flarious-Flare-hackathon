@@ -171,6 +171,37 @@ class TwitterBot:
             "x-rapidapi-key": self.rapidapi_key or "",
         }
 
+    def _validate_tweet_text(self, text: str, content_type: str = "Tweet") -> None:
+        """Validate tweet text length"""
+        if not text:
+            raise ValueError(f"{content_type} text cannot be empty")
+        
+        if len(text) > 280:
+            raise ValueError(f"{content_type} text exceeds 280 characters")
+
+    def _make_request(self, method: str, endpoint: str, **kwargs) -> dict:
+        """Make a request to Twitter API with proper error handling"""
+        url = f"{self.twitter_api_base}/{endpoint}"
+        headers = self._get_twitter_api_headers(method.upper(), url)
+        
+        # Use synchronous requests for sync methods
+        import requests
+        
+        try:
+            response = requests.request(
+                method=method.lower(),
+                url=url,
+                headers=headers,
+                timeout=30,
+                **kwargs
+            )
+            
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error in Twitter API request: {str(e)}")
+            raise
+
     async def post_tweet(
         self, text: str, retry_count: int = 0, max_retries: int = 3
     ) -> str | None:
@@ -319,6 +350,35 @@ class TwitterBot:
             logger.exception("Failed to post reply after max retries")
 
         return None
+
+    # Sync version of post_tweet for use in services.py
+    def post_tweet_sync(self, message: str, **kwargs) -> dict:
+        """Post a new tweet (synchronous version)"""
+        logger.debug("Posting new tweet")
+        self._validate_tweet_text(message)
+
+        response = self._make_request('post', 'tweets', json={'text': message})
+
+        logger.info("Tweet posted successfully")
+        return response
+
+    # Sync version of reply_to_tweet for use in services.py
+    def reply_to_tweet_sync(self, tweet_id: str, message: str, **kwargs) -> dict:
+        """Reply to an existing tweet (synchronous version)"""
+        logger.debug(f"Replying to tweet {tweet_id}")
+        self._validate_tweet_text(message, "Reply")
+
+        response = self._make_request('post',
+                                      'tweets',
+                                      json={
+                                          'text': message,
+                                          'reply': {
+                                              'in_reply_to_tweet_id': tweet_id
+                                          }
+                                      })
+
+        logger.info("Reply posted successfully")
+        return response
 
     async def search_twitter(
         self,
